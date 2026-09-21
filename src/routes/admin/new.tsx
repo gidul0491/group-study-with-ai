@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
 import { action, redirect, useSubmission } from "@solidjs/router";
-import { createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import { TopBar } from "@shared/ui/TopBar";
 import {
@@ -12,6 +12,7 @@ import {
   textInput,
   textArea,
   buttonPrimary,
+  buttonSecondary,
   buttonSmall,
   buttonBlock,
   errorText,
@@ -26,6 +27,26 @@ import {
 } from "@shared/ui/layout.style";
 import { describeError } from "@shared/lib/errors";
 import { isoToLocalInput } from "@shared/lib/time";
+import { style } from "som-style/solid";
+import { theme } from "@style/theme.js";
+
+const dropZone = style({
+  base: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "0.4rem",
+    padding: "1rem",
+    borderRadius: "0.75rem",
+    border: `2px dashed ${theme.borderStrong}`,
+    background: theme.surfaceMuted,
+    textAlign: "center",
+  },
+});
+
+const dropZoneActive = dropZone.extend({
+  base: { borderColor: theme.primary, background: theme.mark },
+});
 
 const createExamAction = action(async (form: FormData) => {
   "use server";
@@ -80,16 +101,18 @@ const createExamAction = action(async (form: FormData) => {
 
 type SourceDraft = {
   mode: "file" | "text";
-  fileName: string;
+  file: File | null;
   short: number;
   multiple: number;
   choices: number;
   maxAnswers: number;
 };
 
-function newDraft(): SourceDraft {
-  return { mode: "file", fileName: "", short: 0, multiple: 5, choices: 4, maxAnswers: 1 };
+function newDraft(file: File | null = null): SourceDraft {
+  return { mode: "file", file, short: 0, multiple: 1, choices: 4, maxAnswers: 1 };
 }
+
+const ACCEPT = /\.(md|markdown|pdf|txt)$/i;
 
 function defaultTimes() {
   const start = new Date();
@@ -103,15 +126,24 @@ export default function NewExam() {
   const [dragOver, setDragOver] = createSignal<number | null>(null);
   const submission = useSubmission(createExamAction);
   const times = defaultTimes();
-  const fileInputs: HTMLInputElement[] = [];
+  const [rejected, setRejected] = createSignal<string | null>(null);
 
-  const setFile = (i: number, file: File | undefined) => {
-    if (!file) return;
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    const input = fileInputs[i];
-    if (input) input.files = dt.files;
-    setSources(i, { mode: "file", fileName: file.name });
+  /**
+   * 파일 여러 개를 받으면 첫 파일은 i번 자료에 넣고, 나머지는 자료 카드를 새로 만들어 넣는다.
+   * i번 자료에 이미 파일이 있으면 전부 새 카드로 간다.
+   */
+  const addFiles = (i: number, list: FileList | File[] | undefined | null) => {
+    const files = Array.from(list ?? []);
+    const bad = files.filter((f) => !ACCEPT.test(f.name)).map((f) => f.name);
+    setRejected(bad.length ? `md·pdf·txt만 넣을 수 있어요: ${bad.join(", ")}` : null);
+    const ok = files.filter((f) => ACCEPT.test(f.name));
+    if (ok.length === 0) return;
+    let rest = ok;
+    if (!sources[i].file) {
+      setSources(i, { mode: "file", file: ok[0] });
+      rest = ok.slice(1);
+    }
+    if (rest.length) setSources((prev) => [...prev, ...rest.map((f) => newDraft(f))]);
   };
 
   return (
@@ -169,7 +201,7 @@ export default function NewExam() {
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragOver(null);
-                  setFile(i(), e.dataTransfer?.files?.[0]);
+                  addFiles(i(), e.dataTransfer?.files);
                 }}
               >
                 <div class={stack}>
@@ -203,18 +235,13 @@ export default function NewExam() {
                     </button>
                   </div>
                   <div style={{ display: s.mode === "file" ? "block" : "none" }}>
-                    <label class={fieldLabel}>파일을 선택하거나 여기로 끌어다 놓으세요</label>
-                    <input
-                      ref={(el) => (fileInputs[i()] = el)}
-                      type="file"
-                      name={`s${i()}.file`}
-                      accept=".md,.markdown,.pdf,.txt,text/markdown,text/plain,application/pdf"
-                      class={textInput}
-                      onChange={(e) => setSources(i(), "fileName", e.currentTarget.files?.[0]?.name ?? "")}
+                    <FileSlot
+                      index={i()}
+                      file={s.file}
+                      dragging={dragOver() === i()}
+                      onFiles={(list) => addFiles(i(), list)}
+                      onClear={() => setSources(i(), "file", null)}
                     />
-                    <Show when={s.fileName}>
-                      <p class={muted}>선택됨: {s.fileName}</p>
-                    </Show>
                   </div>
                   <div style={{ display: s.mode === "text" ? "block" : "none" }}>
                     <textarea
@@ -266,6 +293,9 @@ export default function NewExam() {
             </div>
           </div>
 
+          <Show when={rejected()}>
+            <p class={errorText}>{rejected()}</p>
+          </Show>
           <Show when={submission.result?.error}>
             <p class={errorText}>{submission.result?.error}</p>
           </Show>
@@ -301,6 +331,71 @@ function NumberField(props: {
         required
         onInput={(e) => props.onInput?.(Number(e.currentTarget.value))}
       />
+    </div>
+  );
+}
+
+/**
+ * 파일 자리. 실제 <input type="file">은 숨기고(폼 제출에는 포함) 스토어의 File을 동기화한다.
+ */
+function FileSlot(props: {
+  index: number;
+  file: File | null;
+  dragging: boolean;
+  onFiles: (list: FileList | null) => void;
+  onClear: () => void;
+}) {
+  let input!: HTMLInputElement;
+  createEffect(() => {
+    const dt = new DataTransfer();
+    if (props.file) dt.items.add(props.file);
+    input.files = dt.files;
+  });
+  return (
+    <div class={props.dragging ? dropZoneActive : dropZone}>
+      <input
+        ref={input}
+        type="file"
+        name={`s${props.index}.file`}
+        accept=".md,.markdown,.pdf,.txt,text/markdown,text/plain,application/pdf"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => {
+          props.onFiles(e.currentTarget.files);
+        }}
+      />
+      <Show
+        when={props.file}
+        fallback={
+          <>
+            <div style={{ "font-size": "1.6rem" }}>📄</div>
+            <p class={muted}>여기로 파일을 끌어다 놓거나</p>
+            <button type="button" class={buttonSecondary} onClick={() => input.click()}>
+              파일 선택
+            </button>
+            <p class={muted} style={{ "font-size": "0.8rem" }}>md · pdf · txt, 여러 개면 자료가 자동으로 추가돼요</p>
+          </>
+        }
+      >
+        {(f) => (
+          <div class={rowBetween} style={{ width: "100%" }}>
+            <div style={{ "min-width": "0" }}>
+              <div style={{ "font-weight": "600", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>
+                {f().name}
+              </div>
+              <div class={muted}>{(f().size / 1024).toFixed(0)} KB</div>
+            </div>
+            <div class={rowWrap} style={{ "flex-shrink": "0" }}>
+              <button type="button" class={buttonSmall} onClick={() => input.click()}>
+                바꾸기
+              </button>
+              <button type="button" class={buttonSmall} onClick={props.onClear}>
+                제거
+              </button>
+            </div>
+          </div>
+        )}
+      </Show>
     </div>
   );
 }
