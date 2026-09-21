@@ -9,6 +9,7 @@ import {
   field,
   fieldLabel,
   textInput,
+  textArea,
   buttonPrimary,
   buttonSecondary,
   buttonBlock,
@@ -21,10 +22,23 @@ import { describeError } from "@shared/lib/errors";
 const getSettings = query(async () => {
   "use server";
   const { requireAdmin, requestOrigin } = await import("@modules/auth/auth.controller");
-  const { publicBaseUrl } = await import("@modules/setting/setting.service");
+  const { publicBaseUrl, defaultPrompt } = await import("@modules/setting/setting.service");
   requireAdmin();
-  return { publicBaseUrl: publicBaseUrl(), origin: requestOrigin() };
+  return { publicBaseUrl: publicBaseUrl(), origin: requestOrigin(), defaultPrompt: defaultPrompt() };
 }, "settings");
+
+const saveDefaultPromptAction = action(async (form: FormData) => {
+  "use server";
+  const { requireAdmin } = await import("@modules/auth/auth.controller");
+  const { saveDefaultPrompt } = await import("@modules/setting/setting.service");
+  try {
+    requireAdmin();
+    saveDefaultPrompt(String(form.get("defaultPrompt") ?? ""));
+    return { ok: true as const };
+  } catch (e) {
+    return { error: describeError(e).message };
+  }
+}, "saveDefaultPrompt");
 
 const saveBaseUrl = action(async (form: FormData) => {
   "use server";
@@ -62,6 +76,7 @@ export const route = { preload: () => getSettings() };
 export default function SettingsPage() {
   const settings = createAsync(() => getSettings());
   const baseUrlSub = useSubmission(saveBaseUrl);
+  const promptSub = useSubmission(saveDefaultPromptAction);
   const pwSub = useSubmission(changePasswordAction);
 
   return (
@@ -98,6 +113,42 @@ export default function SettingsPage() {
                   <p class={muted}>저장했습니다.</p>
                 </Show>
                 <button class={buttonPrimary} type="submit" disabled={baseUrlSub.pending}>
+                  저장
+                </button>
+              </div>
+            </form>
+          )}
+        </Show>
+
+        <Show when={settings()}>
+          {(s) => (
+            <form action={saveDefaultPromptAction} method="post" class={card}>
+              <div class={stack}>
+                <div class={cardTitle}>기본 프롬프트</div>
+                <p class={muted}>
+                  새 시험지를 만들 때 공통 프롬프트 칸에 미리 채워집니다. 시험지마다 고쳐 쓸 수 있어요.
+                </p>
+                <div class={field}>
+                  <label class={fieldLabel} for="defaultPrompt">
+                    프롬프트
+                  </label>
+                  <textarea
+                    id="defaultPrompt"
+                    name="defaultPrompt"
+                    class={textArea}
+                    maxLength={5000}
+                    placeholder="예: 개념의 정의보다 왜 그런지를 묻는 문제 위주로. 용어는 영어 원어를 함께 표기."
+                  >
+                    {s().defaultPrompt}
+                  </textarea>
+                </div>
+                <Show when={promptSub.result?.error}>
+                  <p class={errorText}>{promptSub.result?.error}</p>
+                </Show>
+                <Show when={promptSub.result?.ok}>
+                  <p class={muted}>저장했습니다.</p>
+                </Show>
+                <button class={buttonPrimary} type="submit" disabled={promptSub.pending}>
                   저장
                 </button>
               </div>

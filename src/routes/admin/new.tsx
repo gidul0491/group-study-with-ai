@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { action, redirect, useSubmission } from "@solidjs/router";
+import { action, createAsync, query, redirect, useSubmission } from "@solidjs/router";
 import { createEffect, createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 import { TopBar } from "@shared/ui/TopBar";
@@ -47,6 +47,16 @@ const dropZone = style({
 const dropZoneActive = dropZone.extend({
   base: { borderColor: theme.primary, background: theme.mark },
 });
+
+const getNewExamDefaults = query(async () => {
+  "use server";
+  const { requireAdmin } = await import("@modules/auth/auth.controller");
+  const { defaultPrompt } = await import("@modules/setting/setting.service");
+  requireAdmin();
+  return { commonPrompt: defaultPrompt() };
+}, "newExamDefaults");
+
+export const route = { preload: () => getNewExamDefaults() };
 
 const createExamAction = action(async (form: FormData) => {
   "use server";
@@ -127,6 +137,7 @@ export default function NewExam() {
   const submission = useSubmission(createExamAction);
   const times = defaultTimes();
   const [rejected, setRejected] = createSignal<string | null>(null);
+  const defaults = createAsync(() => getNewExamDefaults());
 
   /**
    * 파일 여러 개를 받으면 첫 파일은 i번 자료에 넣고, 나머지는 자료 카드를 새로 만들어 넣는다.
@@ -169,7 +180,10 @@ export default function NewExam() {
                   name="commonPrompt"
                   class={textArea}
                   placeholder="예: 개념의 정의보다 왜 그런지를 묻는 문제 위주로. 용어는 영어 원어를 함께 표기."
-                />
+                >
+                  {defaults()?.commonPrompt ?? ""}
+                </textarea>
+                <p class={muted}>설정의 기본 프롬프트가 미리 채워집니다. 이 시험지에만 다르게 쓰려면 고치세요.</p>
               </div>
             </div>
           </div>
