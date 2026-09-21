@@ -49,3 +49,79 @@ export function sheetFileName(title: string, roundNo: number, withAnswers: boole
   const safe = title.replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 60) || "시험지";
   return `${safe}_${roundNo}차시_${withAnswers ? "답안지" : "문제지"}.${ext}`;
 }
+
+// ---------- 협력 답안 (그룹 선택 + 개인 제출 비율) ----------
+
+export type GroupSheetInput = {
+  title: string;
+  roundNo: number;
+  questions: QuestionView[];
+  /** 그룹이 고른 답 */
+  groupAnswers: Record<number, { choiceIds: number[]; text: string }>;
+  groupScore: { correct: number; total: number } | null;
+  members: { memberNo: number; nickname: string }[];
+  /** 개인풀이 통계 */
+  stats: {
+    questionId: number;
+    submitted: number;
+    correct: number;
+    unanswered: number;
+    choiceCounts: { choiceId: number; count: number }[];
+    shortAnswers: { text: string; count: number; correct: boolean }[];
+  }[];
+};
+
+export function pct(n: number, total: number): string {
+  return total ? `${Math.round((n / total) * 100)}%` : "-";
+}
+
+export function buildGroupMarkdown(input: GroupSheetInput): string {
+  const lines: string[] = [];
+  lines.push(`# ${input.title} — ${input.roundNo}차시 협력 답안`);
+  lines.push("");
+  if (input.groupScore) {
+    const s = input.groupScore;
+    lines.push(`**팀 점수:** ${s.total ? Math.round((s.correct / s.total) * 1000) / 10 : 0}점 (${s.correct}/${s.total})`);
+  } else {
+    lines.push("**팀 점수:** 아직 제출하지 않음");
+  }
+  if (input.members.length) {
+    lines.push(`**참가자:** ${input.members.map((m) => `${m.memberNo}번 ${m.nickname}`).join(", ")}`);
+  }
+  lines.push("");
+  lines.push("범례: ☑ 팀 선택 · ✅ 정답 · % 는 개인풀이 제출 비율");
+  lines.push("");
+  for (const q of input.questions) {
+    const stat = input.stats.find((s) => s.questionId === q.id);
+    const submitted = stat?.submitted ?? 0;
+    const ans = input.groupAnswers[q.id];
+    lines.push(`## ${q.seq}. ${q.text}`);
+    lines.push("");
+    if (q.type === "MULTIPLE") {
+      for (const c of q.choices) {
+        const chosen = ans?.choiceIds.includes(c.id) ? "☑" : "☐";
+        const count = stat?.choiceCounts.find((x) => x.choiceId === c.id)?.count ?? 0;
+        lines.push(`- ${chosen} ${choiceMark(c.seq)} ${c.text}${c.isAnswer ? " ✅" : ""} — 개인 ${pct(count, submitted)}`);
+      }
+    } else {
+      lines.push(`- 팀 답: **${ans?.text?.trim() || "(미선택)"}**`);
+      lines.push(`- 정답: ${q.answers.join(", ")}`);
+      if (stat && stat.shortAnswers.length) {
+        lines.push("- 개인 답안:");
+        for (const a of stat.shortAnswers) {
+          lines.push(`  - ${a.text}${a.correct ? " ✅" : ""} — ${a.count}명 (${pct(a.count, submitted)})`);
+        }
+      }
+    }
+    lines.push(`- 개인 정답률 ${pct(stat?.correct ?? 0, submitted)} · 미선택 ${pct(stat?.unanswered ?? 0, submitted)} · 제출 ${submitted}명`);
+    lines.push("");
+    lines.push(`**해설:** ${q.explanation}`);
+    lines.push("");
+  }
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+export function groupSheetFileName(title: string, roundNo: number, ext: "md" | "pdf"): string {
+  const safe = title.replace(/[\/:*?"<>|]+/g, " ").trim().slice(0, 60) || "시험지";
+  return `${safe}_${roundNo}차시_협력답안.${ext}`;
+}

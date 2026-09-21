@@ -1,5 +1,5 @@
 import { Title } from "@solidjs/meta";
-import { action, createAsync, query, redirect, useSubmission } from "@solidjs/router";
+import { action, createAsync, query, useSubmission } from "@solidjs/router";
 import { Show } from "solid-js";
 import { TopBar } from "@shared/ui/TopBar";
 import {
@@ -21,11 +21,32 @@ import { describeError } from "@shared/lib/errors";
 
 const getSettings = query(async () => {
   "use server";
-  const { requireAdmin, requestOrigin } = await import("@modules/auth/auth.controller");
+  const { me, requestOrigin } = await import("@modules/auth/auth.controller");
   const { publicBaseUrl, defaultPrompt } = await import("@modules/setting/setting.service");
-  requireAdmin();
-  return { publicBaseUrl: publicBaseUrl(), origin: requestOrigin(), defaultPrompt: defaultPrompt() };
+  const admin = me();
+  return {
+    username: admin.username,
+    hasRecovery: admin.hasRecovery,
+    publicBaseUrl: publicBaseUrl(),
+    origin: requestOrigin(),
+    defaultPrompt: defaultPrompt(),
+  };
 }, "settings");
+
+const updateRecoveryAction = action(async (form: FormData) => {
+  "use server";
+  const { updateRecovery } = await import("@modules/auth/auth.controller");
+  try {
+    updateRecovery(
+      String(form.get("currentPassword") ?? ""),
+      String(form.get("recoveryQuestion") ?? ""),
+      String(form.get("recoveryAnswer") ?? ""),
+    );
+    return { ok: true as const };
+  } catch (e) {
+    return { error: describeError(e).message };
+  }
+}, "updateRecovery");
 
 const saveDefaultPromptAction = action(async (form: FormData) => {
   "use server";
@@ -64,12 +85,12 @@ const changePasswordAction = action(async (form: FormData) => {
   }
 }, "changePassword");
 
-const logoutAction = action(async () => {
+/** 로그아웃 뒤 전체 페이지 이동으로 라우터 캐시를 비운다. */
+async function logoutFn(): Promise<void> {
   "use server";
   const { logout } = await import("@modules/auth/auth.controller");
   logout();
-  throw redirect("/");
-}, "logout");
+}
 
 export const route = { preload: () => getSettings() };
 
@@ -78,12 +99,20 @@ export default function SettingsPage() {
   const baseUrlSub = useSubmission(saveBaseUrl);
   const promptSub = useSubmission(saveDefaultPromptAction);
   const pwSub = useSubmission(changePasswordAction);
+  const recoverySub = useSubmission(updateRecoveryAction);
 
   return (
     <>
       <Title>설정</Title>
       <TopBar title="설정" back="/admin" />
       <main class={page}>
+        <Show when={settings()}>
+          {(s) => (
+            <p class={muted}>
+              <strong>{s().username}</strong> 계정으로 로그인 중. 시험지는 이 계정만 볼 수 있어요.
+            </p>
+          )}
+        </Show>
         <Show when={settings()}>
           {(s) => (
             <form action={saveBaseUrl} method="post" class={card}>
@@ -197,11 +226,59 @@ export default function SettingsPage() {
           </div>
         </form>
 
-        <form action={logoutAction} method="post">
-          <button class={`${buttonSecondary} ${buttonBlock}`} type="submit">
-            로그아웃
-          </button>
-        </form>
+        <Show when={settings()}>
+          {(s) => (
+            <form action={updateRecoveryAction} method="post" class={card}>
+              <div class={stack}>
+                <div class={cardTitle}>비밀번호 찾기 질문</div>
+                <p class={muted}>
+                  {s().hasRecovery
+                    ? "질문이 등록되어 있어요. 바꾸려면 새로 입력하세요."
+                    : "아직 질문이 없어요. 등록해 두면 비밀번호를 잊었을 때 찾을 수 있어요."}
+                </p>
+                <div class={field}>
+                  <label class={fieldLabel} for="recoveryQuestion">
+                    질문
+                  </label>
+                  <input id="recoveryQuestion" name="recoveryQuestion" class={textInput} required maxLength={200}
+                    placeholder="예: 처음 키운 반려동물 이름은?" />
+                </div>
+                <div class={field}>
+                  <label class={fieldLabel} for="recoveryAnswer">
+                    답변
+                  </label>
+                  <input id="recoveryAnswer" name="recoveryAnswer" class={textInput} required maxLength={100} autocomplete="off" />
+                </div>
+                <div class={field}>
+                  <label class={fieldLabel} for="currentPassword">
+                    현재 비밀번호 (본인 확인)
+                  </label>
+                  <input id="currentPassword" name="currentPassword" type="password" class={textInput} autocomplete="current-password" required />
+                </div>
+                <Show when={recoverySub.result?.error}>
+                  <p class={errorText}>{recoverySub.result?.error}</p>
+                </Show>
+                <Show when={recoverySub.result?.ok}>
+                  <p class={muted}>등록했습니다.</p>
+                </Show>
+                <button class={buttonPrimary} type="submit" disabled={recoverySub.pending}>
+                  등록
+                </button>
+              </div>
+            </form>
+          )}
+        </Show>
+
+        <button
+          class={`${buttonSecondary} ${buttonBlock}`}
+          type="button"
+          onClick={async () => {
+            await logoutFn();
+            location.assign("/");
+          }}
+        >
+          로그아웃
+        </button>
       </main>
     </>
   );

@@ -6,16 +6,14 @@ import * as service from "./auth.service";
 /**
  * 컨트롤러: 쿠키·요청을 다루고 서비스를 부른다 (가이드 5-3).
  * 서버 함수("use server")와 API 라우트 양쪽에서 쓴다.
+ * 세션 쿠키는 expires 없이 심어 브라우저를 닫으면 사라진다 (들어올 때마다 로그인).
  */
 
-function cookieOptions(expiresAt: string) {
-  return {
-    httpOnly: true,
-    sameSite: "lax" as const,
-    path: "/",
-    expires: new Date(expiresAt),
-  };
-}
+const cookieOptions = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  path: "/",
+};
 
 export function currentAdminId(): number | null {
   const sessionId = getCookie(service.SESSION_COOKIE);
@@ -29,18 +27,22 @@ export function requireAdmin(): number {
   return id;
 }
 
-export function authState(): { hasAdmin: boolean; loggedIn: boolean } {
-  return { hasAdmin: service.hasAdmin(), loggedIn: currentAdminId() !== null };
+export function authState(): { loggedIn: boolean } {
+  return { loggedIn: currentAdminId() !== null };
 }
 
-export function setup(username: string, password: string): void {
-  const s = service.setupAdmin(username, password);
-  setCookie(service.SESSION_COOKIE, s.sessionId, cookieOptions(s.expiresAt));
+export function me(): { id: number; username: string; hasRecovery: boolean } {
+  return service.currentAdmin(requireAdmin());
+}
+
+export function signup(input: service.SignupInput): void {
+  const s = service.signup(input);
+  setCookie(service.SESSION_COOKIE, s.sessionId, cookieOptions);
 }
 
 export function login(username: string, password: string): void {
   const s = service.login(username, password);
-  setCookie(service.SESSION_COOKIE, s.sessionId, cookieOptions(s.expiresAt));
+  setCookie(service.SESSION_COOKIE, s.sessionId, cookieOptions);
 }
 
 export function logout(): void {
@@ -49,8 +51,19 @@ export function logout(): void {
 }
 
 export function changePassword(current: string, next: string): void {
-  const id = requireAdmin();
-  service.changePassword(id, current, next);
+  service.changePassword(requireAdmin(), current, next);
+}
+
+export function updateRecovery(currentPassword: string, question: string, answer: string): void {
+  service.updateRecovery(requireAdmin(), currentPassword, question, answer);
+}
+
+export function recoveryQuestion(username: string): string {
+  return service.recoveryQuestion(username);
+}
+
+export function resetPassword(username: string, answer: string, newPassword: string, confirm: string): void {
+  service.resetPassword(username, answer, newPassword, confirm);
 }
 
 /** 요청 Origin (공개 주소가 비어 있을 때의 기본값). */

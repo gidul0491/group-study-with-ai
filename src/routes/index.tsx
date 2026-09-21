@@ -1,6 +1,6 @@
 import { Title } from "@solidjs/meta";
-import { action, createAsync, Navigate, query, redirect, useSubmission } from "@solidjs/router";
-import { Show } from "solid-js";
+import { A, createAsync, Navigate, query, useSearchParams } from "@solidjs/router";
+import { createSignal, Show } from "solid-js";
 import {
   centerBox,
   heading,
@@ -13,6 +13,7 @@ import {
   buttonBlock,
   errorText,
   stack,
+  rowBetween,
 } from "@shared/ui/layout.style";
 import { describeError } from "@shared/lib/errors";
 
@@ -22,26 +23,41 @@ const getAuthState = query(async () => {
   return authState();
 }, "authState");
 
-const submitAuth = action(async (form: FormData) => {
+/**
+ * 로그인은 액션 대신 서버 함수 + 전체 페이지 이동으로 처리한다.
+ * 액션 리다이렉트와 라우터 캐시가 엇갈려 "/"와 "/admin" 사이를 오가는 문제를 피한다.
+ */
+async function loginFn(form: FormData): Promise<{ ok: true } | { error: string }> {
   "use server";
-  const { setup, login } = await import("@modules/auth/auth.controller");
-  const username = String(form.get("username") ?? "");
-  const password = String(form.get("password") ?? "");
-  const mode = String(form.get("mode") ?? "login");
+  const { login } = await import("@modules/auth/auth.controller");
   try {
-    if (mode === "setup") setup(username, password);
-    else login(username, password);
+    login(String(form.get("username") ?? ""), String(form.get("password") ?? ""));
+    return { ok: true };
   } catch (e) {
     return { error: describeError(e).message };
   }
-  throw redirect("/admin");
-}, "submitAuth");
+}
 
 export const route = { preload: () => getAuthState() };
 
 export default function Home() {
   const state = createAsync(() => getAuthState());
-  const submission = useSubmission(submitAuth);
+  const [params] = useSearchParams();
+  const [error, setError] = createSignal<string | null>(null);
+  const [pending, setPending] = createSignal(false);
+
+  const onSubmit = async (e: SubmitEvent) => {
+    e.preventDefault();
+    setPending(true);
+    setError(null);
+    const r = await loginFn(new FormData(e.currentTarget as HTMLFormElement));
+    if ("error" in r) {
+      setError(r.error);
+      setPending(false);
+      return;
+    }
+    location.assign("/admin");
+  };
 
   return (
     <main class={centerBox}>
@@ -52,24 +68,15 @@ export default function Home() {
             <div class={stack} style={{ width: "100%", "max-width": "22rem" }}>
               <h1 class={heading}>그룹 스터디</h1>
               <p class={muted}>
-                {s().hasAdmin
-                  ? "관리자 계정으로 로그인하세요."
-                  : "처음 실행입니다. 관리자 계정을 만드세요."}
+                {params.reset ? "비밀번호를 바꿨어요. 새 비밀번호로 로그인하세요." : "관리자 계정으로 로그인하세요."}
               </p>
-              <form action={submitAuth} method="post" class={card}>
+              <form onSubmit={onSubmit} class={card}>
                 <div class={stack}>
-                  <input type="hidden" name="mode" value={s().hasAdmin ? "login" : "setup"} />
                   <div class={field}>
                     <label class={fieldLabel} for="username">
                       아이디
                     </label>
-                    <input
-                      id="username"
-                      name="username"
-                      class={textInput}
-                      autocomplete="username"
-                      required
-                    />
+                    <input id="username" name="username" class={textInput} autocomplete="username" required />
                   </div>
                   <div class={field}>
                     <label class={fieldLabel} for="password">
@@ -80,22 +87,26 @@ export default function Home() {
                       name="password"
                       type="password"
                       class={textInput}
-                      autocomplete={s().hasAdmin ? "current-password" : "new-password"}
+                      autocomplete="current-password"
                       required
                     />
                   </div>
-                  <Show when={submission.result?.error}>
-                    <p class={errorText}>{submission.result?.error}</p>
+                  <Show when={error()}>
+                    <p class={errorText}>{error()}</p>
                   </Show>
-                  <button
-                    type="submit"
-                    class={`${buttonPrimary} ${buttonBlock}`}
-                    disabled={submission.pending}
-                  >
-                    {s().hasAdmin ? "로그인" : "계정 만들고 시작"}
+                  <button type="submit" class={`${buttonPrimary} ${buttonBlock}`} disabled={pending()}>
+                    로그인
                   </button>
                 </div>
               </form>
+              <div class={rowBetween}>
+                <A href="/signup" class={muted}>
+                  회원가입
+                </A>
+                <A href="/recover" class={muted}>
+                  비밀번호 찾기
+                </A>
+              </div>
             </div>
           </Show>
         )}

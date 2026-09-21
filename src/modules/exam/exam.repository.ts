@@ -2,6 +2,7 @@ import { db } from "@shared/db/db";
 
 export type ExamRow = {
   id: number;
+  admin_id: number;
   title: string;
   common_prompt: string;
   created_at: string;
@@ -90,10 +91,10 @@ export type GenerationLogRow = {
 
 // ---------- exam ----------
 
-export function insertExam(title: string, commonPrompt: string, at: string): number {
+export function insertExam(adminId: number, title: string, commonPrompt: string, at: string): number {
   const r = db()
-    .prepare("INSERT INTO exam (title, common_prompt, created_at, updated_at) VALUES (?, ?, ?, ?)")
-    .run(title, commonPrompt, at, at);
+    .prepare("INSERT INTO exam (admin_id, title, common_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .run(adminId, title, commonPrompt, at, at);
   return Number(r.lastInsertRowid);
 }
 
@@ -101,8 +102,22 @@ export function findExam(id: number): ExamRow | null {
   return (db().prepare("SELECT * FROM exam WHERE id = ?").get(id) as ExamRow) ?? null;
 }
 
-export function listExams(): ExamRow[] {
-  return db().prepare("SELECT * FROM exam ORDER BY id DESC").all() as ExamRow[];
+export function listExams(adminId: number): ExamRow[] {
+  return db().prepare("SELECT * FROM exam WHERE admin_id = ? ORDER BY id DESC").all(adminId) as ExamRow[];
+}
+
+/** 차시 → 시험지 id. 소유자 확인용. */
+export function examIdOfRound(roundId: number): number | null {
+  const row = db().prepare("SELECT exam_id FROM round WHERE id = ?").get(roundId) as { exam_id: number } | undefined;
+  return row?.exam_id ?? null;
+}
+
+/** 링크 → 시험지 id. 소유자 확인용. */
+export function examIdOfLink(linkId: number): number | null {
+  const row = db()
+    .prepare("SELECT r.exam_id FROM access_link l JOIN round r ON r.id = l.round_id WHERE l.id = ?")
+    .get(linkId) as { exam_id: number } | undefined;
+  return row?.exam_id ?? null;
 }
 
 export function touchExam(id: number, at: string): void {

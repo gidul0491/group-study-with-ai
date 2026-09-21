@@ -411,7 +411,7 @@ function ResultsView(props: { exam: ExamDetail }) {
       </div>
       <Show when={results()}>
         {(r) => (
-          <Show when={mode() === "solo"} fallback={<GroupResults results={r()} showAnswers={showAnswers()} />}>
+          <Show when={mode() === "solo"} fallback={<GroupResults results={r()} showAnswers={showAnswers()} examId={props.exam.id} />}>
             <SoloResults results={r()} showAnswers={showAnswers()} />
           </Show>
         )}
@@ -508,13 +508,19 @@ function SoloResults(props: { results: RoundResults; showAnswers: boolean }) {
   );
 }
 
-function GroupResults(props: { results: RoundResults; showAnswers: boolean }) {
+function GroupResults(props: { results: RoundResults; showAnswers: boolean; examId: number }) {
   const g = () => props.results.group;
+  const base = () => `/api/exams/${props.examId}/sheet?kind=group&round=${props.results.roundId}`;
   return (
     <div class={stack}>
       <Show when={g()} fallback={<div class={card}><p class={muted}>아직 협력풀이 방이 열리지 않았습니다.</p></div>}>
         {(room) => (
           <>
+            <div class={rowWrap}>
+              <a class={buttonSmall} href={`${base()}&format=md`} download="">협력 답안 md</a>
+              <a class={buttonSmall} href={`${base()}&format=pdf`} download="">협력 답안 pdf</a>
+              <span class={muted}>팀 선택 + 개인 제출 비율</span>
+            </div>
             <div class={card}>
               <div class={stack}>
                 <div class={rowBetween}>

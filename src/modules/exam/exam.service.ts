@@ -66,7 +66,28 @@ function validateSource(s: SourceInput, index: number): void {
 
 // ---------- 생성 ----------
 
-export function createExam(input: CreateExamInput): { examId: number; roundId: number } {
+/** 시험지가 이 관리자의 것이 아니면 404 (남의 시험지는 존재를 알리지 않는다). */
+export function assertOwner(examId: number, adminId: number): repo.ExamRow {
+  const exam = repo.findExam(examId);
+  if (!exam || exam.admin_id !== adminId) throw notFound("시험지를 찾을 수 없습니다.");
+  return exam;
+}
+
+export function assertRoundOwner(roundId: number, adminId: number): number {
+  const examId = repo.examIdOfRound(roundId);
+  if (examId === null) throw notFound("차시를 찾을 수 없습니다.");
+  assertOwner(examId, adminId);
+  return examId;
+}
+
+export function assertLinkOwner(linkId: number, adminId: number): number {
+  const examId = repo.examIdOfLink(linkId);
+  if (examId === null) throw notFound("링크를 찾을 수 없습니다.");
+  assertOwner(examId, adminId);
+  return examId;
+}
+
+export function createExam(adminId: number, input: CreateExamInput): { examId: number; roundId: number } {
   const title = input.title.trim();
   if (!title || title.length > 100) throw badRequest("제목은 1~100자로 입력하세요.");
   if (input.sources.length === 0) throw badRequest("자료를 하나 이상 넣으세요.");
@@ -76,7 +97,7 @@ export function createExam(input: CreateExamInput): { examId: number; roundId: n
 
   const ids = transaction(() => {
     const at = nowIso();
-    const examId = repo.insertExam(title, input.commonPrompt.trim(), at);
+    const examId = repo.insertExam(adminId, title, input.commonPrompt.trim(), at);
     const roundId = repo.insertRound(
       examId, 1, input.startsAt, input.endsAt, input.soloLimitMin, input.groupLimitMin, at,
     );
@@ -127,8 +148,8 @@ export type ExamSummary = {
   createdAt: string;
 };
 
-export function listExamSummaries(): ExamSummary[] {
-  return repo.listExams().map((e) => {
+export function listExamSummaries(adminId: number): ExamSummary[] {
+  return repo.listExams(adminId).map((e) => {
     const latest = repo.findLatestRound(e.id);
     return {
       id: e.id,

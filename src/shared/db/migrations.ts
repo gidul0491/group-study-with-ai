@@ -200,4 +200,22 @@ CREATE TABLE group_answer (
 CREATE UNIQUE INDEX uk_group_answer ON group_answer(room_id, question_id);
 `,
   },
+  {
+    name: "002_admin_recovery",
+    sql: `
+-- 비밀번호 찾기용 질문·답변. 답변은 정규화(공백·문장부호 제거, 소문자) 후 scrypt 해시로만 저장.
+-- 빈 문자열이면 아직 등록하지 않은 계정 (설정에서 등록).
+ALTER TABLE admin ADD COLUMN recovery_question TEXT NOT NULL DEFAULT '';
+ALTER TABLE admin ADD COLUMN recovery_answer_hash TEXT NOT NULL DEFAULT '';
+`,
+  },
+  {
+    name: "003_exam_owner",
+    sql: `
+-- 시험지는 만든 관리자만 관리한다. 기존 시험지는 가장 먼저 만든 계정에 귀속.
+ALTER TABLE exam ADD COLUMN admin_id INTEGER REFERENCES admin(id) ON DELETE CASCADE;
+UPDATE exam SET admin_id = (SELECT MIN(id) FROM admin) WHERE admin_id IS NULL;
+CREATE INDEX ix_exam_admin ON exam(admin_id);
+`,
+  },
 ];
