@@ -1,0 +1,11 @@
+dist
+.output
+.nitro
+node_modules
+data/
+.env
+.env.txt
+.env*.local
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
